@@ -1,9 +1,32 @@
 const express = require("express");
 const { port, verifyToken } = require("./config");
-const { sendTextMessage } = require("./services/whatsapp");
+const { sendMessages } = require("./services/whatsapp");
 const { initializeDatabase } = require("./services/db");
-const { handleIncomingText } = require("./bot/handlers");
+const { handleIncomingMessage } = require("./bot/handlers");
 const { loadProducts } = require("./store/products");
+
+function extractIncomingInput(message) {
+  if (message.type === "text") {
+    return {
+      inputType: "text",
+      input: message.text?.body || ""
+    };
+  }
+
+  if (message.type === "interactive") {
+    const buttonReply = message.interactive?.button_reply?.id;
+    const listReply = message.interactive?.list_reply?.id;
+
+    if (buttonReply || listReply) {
+      return {
+        inputType: "interactive",
+        input: buttonReply || listReply
+      };
+    }
+  }
+
+  return null;
+}
 
 async function startServer() {
   loadProducts();
@@ -38,16 +61,25 @@ async function startServer() {
       const value = change?.value;
       const message = value?.messages?.[0];
 
-      if (!message || message.type !== "text") {
+      if (!message) {
+        return res.sendStatus(200);
+      }
+
+      const incomingInput = extractIncomingInput(message);
+      if (!incomingInput) {
         return res.sendStatus(200);
       }
 
       const from = message.from;
-      const text = message.text?.body || "";
       const profileName = value?.contacts?.[0]?.profile?.name || "Customer";
-      const reply = await handleIncomingText({ from, profileName, text });
+      const replies = await handleIncomingMessage({
+        from,
+        profileName,
+        input: incomingInput.input,
+        inputType: incomingInput.inputType
+      });
 
-      await sendTextMessage(from, reply);
+      await sendMessages(from, replies);
       return res.sendStatus(200);
     } catch (error) {
       console.error(error);

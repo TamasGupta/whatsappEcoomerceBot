@@ -12,6 +12,9 @@ This project is built for the WhatsApp Cloud API webhook flow. If you do not con
 
 ## Features
 
+- interactive home menu with WhatsApp buttons
+- category browsing with WhatsApp list menus
+- product detail actions for add-to-cart and buy-now
 - product catalog loaded from `data/products.json`
 - keyword search across product name, category, description, and tags
 - cart management with add/remove actions
@@ -41,7 +44,15 @@ This project is built for the WhatsApp Cloud API webhook flow. If you do not con
 └── render.yaml
 ```
 
-## Commands Users Can Send
+## Customer Flow
+
+- `Start` opens a home menu with `Browse`, `Search`, and `Cart`
+- `Browse` opens a category list
+- selecting a category opens a product list
+- selecting a product shows product details plus `Add 1`, `Buy Now`, and `View Cart`
+- checkout continues with address collection and payment buttons
+
+## Text Commands Users Can Send
 
 - `catalog`
 - `search earphones`
@@ -134,27 +145,30 @@ Subscribe to message webhooks for your WhatsApp app.
 ## Sample Conversation
 
 ```text
-User: catalog
-Bot: Available products...
+User: start
+Bot: Hi Test, welcome to MotoCommerce.
+Bot: [Browse] [Search] [Cart]
 
-User: search jeans
-Bot: Slim Fit Blue Jeans (P1002) - Rs.1,499.00
+User: taps Browse
+Bot: category list menu
 
-User: add P1002 1
-Bot: Slim Fit Blue Jeans added to cart...
+User: taps Electronics
+Bot: product list menu
 
-User: checkout
+User: taps Wireless Neckband Earphones
+Bot: product details + Add 1 / Buy Now / View Cart
+
+User: taps Buy Now
 Bot: Please send your full delivery address.
 
 User: 14 MG Road, Bengaluru
-Bot: Choose payment mode: cod or upi.
+Bot: payment buttons for Cash on Delivery / UPI
 
-User: cod
+User: taps UPI
 Bot: Order placed successfully: ORD-0001
 ```
 
 ## Next Improvements
 
-- send interactive list buttons instead of plain text commands
 - integrate payments and order status updates
 - add admin flows for managing products and stock

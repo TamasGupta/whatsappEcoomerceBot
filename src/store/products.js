@@ -21,6 +21,16 @@ function getProductById(id) {
   return getProducts().find((product) => product.id.toLowerCase() === id.toLowerCase());
 }
 
+function getCategories() {
+  return [...new Set(getProducts().map((product) => product.category))].sort();
+}
+
+function getProductsByCategory(category) {
+  return getProducts().filter(
+    (product) => product.category.toLowerCase() === category.trim().toLowerCase()
+  );
+}
+
 function searchProducts(query) {
   const term = query.trim().toLowerCase();
   if (!term) {
@@ -63,8 +73,10 @@ function formatProduct(product) {
 module.exports = {
   formatCurrency,
   formatProduct,
+  getCategories,
   getProductById,
   getProducts,
+  getProductsByCategory,
   loadProducts,
   searchProducts
 };

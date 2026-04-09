@@ -1,4 +1,4 @@
-const { getSession, resetSession } = require("./sessionStore");
+const { getSession, resetSession, saveSession } = require("./sessionStore");
 const { createOrder } = require("../store/orders");
 const {
   formatCurrency,
@@ -85,18 +85,19 @@ function removeFromCart(session, productId) {
   return session.cart.length !== initialSize;
 }
 
-function beginCheckout(session) {
+async function beginCheckout(from, session) {
   session.step = "awaiting_address";
   session.checkoutDraft = {
     shippingAddress: "",
     paymentMode: ""
   };
+  await saveSession(from, session);
 
   return "Please send your full delivery address.";
 }
 
-function finalizeOrder({ from, profileName, session }) {
-  const order = createOrder({
+async function finalizeOrder({ from, profileName, session }) {
+  const order = await createOrder({
     customerPhone: from,
     customerName: profileName || "Customer",
     items: session.cart.map((item) => ({ ...item })),
@@ -105,7 +106,7 @@ function finalizeOrder({ from, profileName, session }) {
   });
 
   const total = order.items.reduce((sum, item) => sum + item.price * item.quantity, 0);
-  resetSession(from);
+  await resetSession(from);
 
   return [
     `Order placed successfully: ${order.id}`,
@@ -117,10 +118,11 @@ function finalizeOrder({ from, profileName, session }) {
   ].join("\n");
 }
 
-function handleCheckoutStep({ text, from, profileName, session }) {
+async function handleCheckoutStep({ text, from, profileName, session }) {
   if (session.step === "awaiting_address") {
     session.checkoutDraft.shippingAddress = text;
     session.step = "awaiting_payment";
+    await saveSession(from, session);
     return "Choose payment mode: `cod` or `upi`.";
   }
 
@@ -131,14 +133,15 @@ function handleCheckoutStep({ text, from, profileName, session }) {
     }
 
     session.checkoutDraft.paymentMode = normalized.toUpperCase();
+    await saveSession(from, session);
     return finalizeOrder({ from, profileName, session });
   }
 
   return null;
 }
 
-function handleIncomingText({ from, profileName, text }) {
-  const session = getSession(from);
+async function handleIncomingText({ from, profileName, text }) {
+  const session = await getSession(from);
   const trimmedText = text.trim();
   const normalized = trimmedText.toLowerCase();
 
@@ -163,7 +166,7 @@ function handleIncomingText({ from, profileName, text }) {
       return "Your cart is empty. Add products before checkout.";
     }
 
-    return beginCheckout(session);
+    return beginCheckout(from, session);
   }
 
   if (normalized.startsWith("search ")) {
@@ -206,12 +209,18 @@ function handleIncomingText({ from, profileName, text }) {
     }
 
     addToCart(session, product, quantity);
+    await saveSession(from, session);
     return `${product.name} added to cart.\n\n${summarizeCart(session)}`;
   }
 
   if (normalized.startsWith("remove ")) {
     const productId = trimmedText.split(/\s+/)[1];
     const removed = removeFromCart(session, productId);
+
+    if (removed) {
+      await saveSession(from, session);
+    }
+
     return removed ? summarizeCart(session) : `Product ${productId} is not in your cart.`;
   }
 

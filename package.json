@@ -1,0 +1,25 @@
+{
+  "name": "whatsapp-ecommerce-bot",
+  "version": "1.0.0",
+  "description": "WhatsApp ecommerce bot with catalog browsing, search, cart, and ordering.",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "whatsapp",
+    "ecommerce",
+    "bot",
+    "webhook"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2"
+  }
+}

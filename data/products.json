@@ -1,0 +1,56 @@
+[
+  {
+    "id": "P1001",
+    "name": "Classic White T-Shirt",
+    "category": "Fashion",
+    "description": "Soft cotton crew neck t-shirt for daily wear.",
+    "price": 699,
+    "stock": 25,
+    "tags": ["tshirt", "cotton", "white", "men", "women"]
+  },
+  {
+    "id": "P1002",
+    "name": "Slim Fit Blue Jeans",
+    "category": "Fashion",
+    "description": "Stretch denim jeans with slim fit silhouette.",
+    "price": 1499,
+    "stock": 14,
+    "tags": ["jeans", "denim", "blue", "pants"]
+  },
+  {
+    "id": "P2001",
+    "name": "Wireless Neckband Earphones",
+    "category": "Electronics",
+    "description": "Bluetooth neckband with 20-hour battery life.",
+    "price": 1799,
+    "stock": 32,
+    "tags": ["audio", "earphones", "bluetooth", "neckband"]
+  },
+  {
+    "id": "P2002",
+    "name": "10,000mAh Fast Charging Power Bank",
+    "category": "Electronics",
+    "description": "Compact power bank with USB-C fast charging.",
+    "price": 1299,
+    "stock": 18,
+    "tags": ["power bank", "battery", "charger", "usb-c"]
+  },
+  {
+    "id": "P3001",
+    "name": "Herbal Face Wash",
+    "category": "Beauty",
+    "description": "Gentle face wash with aloe and neem extracts.",
+    "price": 349,
+    "stock": 40,
+    "tags": ["skincare", "face wash", "herbal", "aloe"]
+  },
+  {
+    "id": "P4001",
+    "name": "Stainless Steel Water Bottle",
+    "category": "Home",
+    "description": "750ml insulated bottle that keeps drinks cold for 12 hours.",
+    "price": 899,
+    "stock": 22,
+    "tags": ["bottle", "steel", "home", "kitchen"]
+  }
+]

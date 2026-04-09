@@ -3,6 +3,7 @@ const { port, verifyToken } = require("./config");
 const { sendMessages } = require("./services/whatsapp");
 const { initializeDatabase } = require("./services/db");
 const { handleIncomingMessage } = require("./bot/handlers");
+const { markIfNew } = require("./bot/messageDeduper");
 const { loadProducts } = require("./store/products");
 
 function extractIncomingInput(message) {
@@ -70,17 +71,30 @@ async function startServer() {
         return res.sendStatus(200);
       }
 
+      if (!markIfNew(message.id)) {
+        return res.sendStatus(200);
+      }
+
       const from = message.from;
       const profileName = value?.contacts?.[0]?.profile?.name || "Customer";
-      const replies = await handleIncomingMessage({
-        from,
-        profileName,
-        input: incomingInput.input,
-        inputType: incomingInput.inputType
-      });
+      res.sendStatus(200);
 
-      await sendMessages(from, replies);
-      return res.sendStatus(200);
+      void (async () => {
+        try {
+          const replies = await handleIncomingMessage({
+            from,
+            profileName,
+            input: incomingInput.input,
+            inputType: incomingInput.inputType
+          });
+
+          await sendMessages(from, replies);
+        } catch (error) {
+          console.error("Async webhook processing failed:", error);
+        }
+      })();
+
+      return;
     } catch (error) {
       console.error(error);
       return res.sendStatus(500);

@@ -12,8 +12,7 @@ const {
 
 const HOME_BUTTONS = [
   { id: "MENU_BROWSE", title: "Browse" },
-  { id: "MENU_SEARCH", title: "Search" },
-  { id: "MENU_CART", title: "Cart" }
+  { id: "MENU_SEARCH", title: "Search" }
 ];
 
 function text(body) {
@@ -42,17 +41,15 @@ function homeMessages(profileName) {
 
 function helpMessages() {
   return [
-    buttons("Use the menu or type a command.", HOME_BUTTONS, "Text commands still work."),
+    buttons("Use the menu or type a command.", HOME_BUTTONS, "Quick ordering is enabled."),
     text(
       [
         "Text commands:",
         "catalog",
         "search <keyword>",
         "view <product_id>",
-        "add <product_id> <qty>",
-        "cart",
-        "remove <product_id>",
-        "checkout"
+        "order <product_id> <qty>",
+        "help"
       ].join("\n")
     )
   ];
@@ -98,7 +95,7 @@ function buildProductListMessage(title, products, emptyMessage) {
   return [
     list(
       title,
-      "Select a product to see details and add it to your cart.",
+      "Select a product to see details and order it.",
       "View Products",
       [
         {
@@ -115,15 +112,27 @@ function buildProductListMessage(title, products, emptyMessage) {
   ];
 }
 
-function summarizeCart(session) {
-  if (!session.cart.length) {
-    return "Your cart is empty.";
-  }
+function setPendingOrder(session, product, quantity) {
+  session.cart = [
+    {
+      productId: product.id,
+      name: product.name,
+      price: product.price,
+      quantity
+    }
+  ];
+}
 
-  const total = session.cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
+function getPendingOrder(session) {
+  return session.cart || [];
+}
+
+function buildOrderPreview(items) {
+  const total = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+
   return [
-    "Your cart:",
-    ...session.cart.map(
+    "Order summary:",
+    ...items.map(
       (item, index) =>
         `${index + 1}. ${item.name} x ${item.quantity} = ${formatCurrency(item.price * item.quantity)}`
     ),
@@ -132,91 +141,44 @@ function summarizeCart(session) {
   ].join("\n");
 }
 
-function buildCartMessages(session) {
-  if (!session.cart.length) {
-    return [
-      text("Your cart is empty right now."),
-      buttons("Browse the catalog or search for products.", HOME_BUTTONS)
-    ];
-  }
-
+function buildProductMessages(product) {
   return [
-    text(summarizeCart(session)),
-    buttons(
-      "Manage your cart.",
-      [
-        { id: "CHECKOUT_START", title: "Checkout" },
-        { id: "MENU_BROWSE", title: "Shop More" },
-        { id: "CART_CLEAR", title: "Clear Cart" }
-      ],
-      "Remove specific items with `remove <product_id>` if needed."
-    )
-  ];
-}
-
-function buildProductMessages(product, session) {
-  const existing = session.cart.find((item) => item.productId === product.id);
-  const cartNote = existing ? `Already in cart: ${existing.quantity}` : "Not in cart yet.";
-
-  return [
-    text(`${formatProduct(product)}\n${cartNote}`),
+    text(formatProduct(product)),
     buttons(
       "Choose an action for this product.",
       [
-        { id: `ADD_${product.id}`, title: "Add 1" },
-        { id: `BUY_${product.id}`, title: "Buy Now" },
-        { id: "MENU_CART", title: "View Cart" }
+        { id: `ORDER_${product.id}`, title: "Order Now" },
+        { id: "MENU_BROWSE", title: "Browse" },
+        { id: "MENU_SEARCH", title: "Search" }
       ],
-      "Use text command add <product_id> <qty> for larger quantities."
+      "Use text command order <product_id> <qty> for custom quantity."
     )
   ];
 }
 
-function addToCart(session, product, quantity) {
-  const existingItem = session.cart.find((item) => item.productId === product.id);
-
-  if (existingItem) {
-    existingItem.quantity += quantity;
-    return;
-  }
-
-  session.cart.push({
-    productId: product.id,
-    name: product.name,
-    price: product.price,
-    quantity
-  });
-}
-
-async function clearCart(from) {
-  const session = await resetSession(from);
-  return [
-    text("Your cart has been cleared."),
-    buttons("What would you like to do next?", HOME_BUTTONS)
-  ];
-}
-
-async function beginCheckout(from, session) {
+async function beginOrder(from, session, product, quantity) {
+  setPendingOrder(session, product, quantity);
   session.step = "awaiting_address";
   session.checkoutDraft = {
     shippingAddress: "",
-    paymentMode: ""
+    paymentMode: "PENDING"
   };
   await saveSession(from, session);
 
   return [
-    text("Please send your full delivery address."),
-    text("Include name, house or street, area, city, state, and pincode.")
+    text(buildOrderPreview(getPendingOrder(session))),
+    text("Please send your full delivery address to confirm this order.")
   ];
 }
 
 async function finalizeOrder({ from, profileName, session }) {
+  const items = getPendingOrder(session);
   const order = await createOrder({
     customerPhone: from,
     customerName: profileName || "Customer",
-    items: session.cart.map((item) => ({ ...item })),
+    items: items.map((item) => ({ ...item })),
     shippingAddress: session.checkoutDraft.shippingAddress,
-    paymentMode: session.checkoutDraft.paymentMode
+    paymentMode: "PENDING"
   });
 
   const total = order.items.reduce((sum, item) => sum + item.price * item.quantity, 0);
@@ -225,17 +187,17 @@ async function finalizeOrder({ from, profileName, session }) {
   return [
     text(
       [
-        `Order placed successfully: ${order.id}`,
-        `Payment: ${order.paymentMode}`,
-        `Total: ${formatCurrency(total)}`,
-        `Shipping to: ${order.shippingAddress}`
-      ].join("\n")
+        `Order confirmed: ${order.id}`,
+        buildOrderPreview(order.items),
+        `Delivery address: ${order.shippingAddress}`,
+        "Payment: To be configured later"
+      ].join("\n\n")
     ),
-    buttons("Want to keep shopping?", HOME_BUTTONS)
+    buttons("Want to order another product?", HOME_BUTTONS)
   ];
 }
 
-async function handleCheckoutStep({ input, from, profileName, session }) {
+async function handleStep({ input, from, profileName, session }) {
   if (session.step === "awaiting_search") {
     session.step = "idle";
     await saveSession(from, session);
@@ -253,34 +215,6 @@ async function handleCheckoutStep({ input, from, profileName, session }) {
 
   if (session.step === "awaiting_address") {
     session.checkoutDraft.shippingAddress = input;
-    session.step = "awaiting_payment";
-    await saveSession(from, session);
-    return [
-      text("How would you like to pay?"),
-      buttons(
-        "Choose a payment mode.",
-        [
-          { id: "PAY_COD", title: "Cash on Delivery" },
-          { id: "PAY_UPI", title: "UPI" }
-        ],
-        "Tap one option to confirm payment mode."
-      )
-    ];
-  }
-
-  if (session.step === "awaiting_payment") {
-    const normalized = input.toLowerCase();
-    if (!["cod", "upi"].includes(normalized)) {
-      return [
-        text("Invalid payment mode."),
-        buttons("Choose a valid payment mode.", [
-          { id: "PAY_COD", title: "Cash on Delivery" },
-          { id: "PAY_UPI", title: "UPI" }
-        ])
-      ];
-    }
-
-    session.checkoutDraft.paymentMode = normalized.toUpperCase();
     await saveSession(from, session);
     return finalizeOrder({ from, profileName, session });
   }
@@ -301,42 +235,8 @@ async function handleInteractiveCommand({ command, from, profileName, session })
     return [text("Send a keyword to search the catalog. Example: earphones, jeans, bottle")];
   }
 
-  if (command === "MENU_CART") {
-    session.step = "idle";
-    await saveSession(from, session);
-    return buildCartMessages(session);
-  }
-
   if (command === "CATALOG_ALL") {
     return buildProductListMessage("All Products", getProducts(), "No products available right now.");
-  }
-
-  if (command === "CHECKOUT_START") {
-    if (!session.cart.length) {
-      return [text("Your cart is empty."), buttons("Browse products to add items.", HOME_BUTTONS)];
-    }
-
-    return beginCheckout(from, session);
-  }
-
-  if (command === "CART_CLEAR") {
-    return clearCart(from);
-  }
-
-  if (command === "PAY_COD") {
-    if (session.step !== "awaiting_payment") {
-      return [text("Start checkout first before choosing a payment mode.")];
-    }
-
-    return handleCheckoutStep({ input: "cod", from, profileName, session });
-  }
-
-  if (command === "PAY_UPI") {
-    if (session.step !== "awaiting_payment") {
-      return [text("Start checkout first before choosing a payment mode.")];
-    }
-
-    return handleCheckoutStep({ input: "upi", from, profileName, session });
   }
 
   if (command.startsWith("CATEGORY_")) {
@@ -362,29 +262,16 @@ async function handleInteractiveCommand({ command, from, profileName, session })
       return [text("That product is no longer available."), buildCategoryListMessage()];
     }
 
-    return buildProductMessages(product, session);
+    return buildProductMessages(product);
   }
 
-  if (command.startsWith("ADD_") || command.startsWith("BUY_")) {
-    const product = getProductById(command.replace(/^(ADD|BUY)_/, ""));
+  if (command.startsWith("ORDER_")) {
+    const product = getProductById(command.replace("ORDER_", ""));
     if (!product) {
       return [text("That product is no longer available.")];
     }
 
-    addToCart(session, product, 1);
-    await saveSession(from, session);
-
-    if (command.startsWith("BUY_")) {
-      return [
-        text(`${product.name} added to your cart.`),
-        ...(await beginCheckout(from, session))
-      ];
-    }
-
-    return [
-      text(`${product.name} added to your cart.`),
-      ...buildCartMessages(session)
-    ];
+    return beginOrder(from, session, product, 1);
   }
 
   return [text("I could not process that menu action."), ...helpMessages()];
@@ -395,7 +282,7 @@ async function handleTextCommand({ textInput, from, profileName, session }) {
   const normalized = trimmedText.toLowerCase();
 
   if (session.step !== "idle") {
-    return handleCheckoutStep({ input: trimmedText, from, profileName, session });
+    return handleStep({ input: trimmedText, from, profileName, session });
   }
 
   if (!trimmedText || normalized === "help" || normalized === "menu" || normalized === "start") {
@@ -404,18 +291,6 @@ async function handleTextCommand({ textInput, from, profileName, session }) {
 
   if (normalized === "catalog") {
     return [buildCategoryListMessage()];
-  }
-
-  if (normalized === "cart") {
-    return buildCartMessages(session);
-  }
-
-  if (normalized === "checkout") {
-    if (!session.cart.length) {
-      return [text("Your cart is empty. Add products before checkout."), buttons("Open the store.", HOME_BUTTONS)];
-    }
-
-    return beginCheckout(from, session);
   }
 
   if (normalized.startsWith("search ")) {
@@ -437,10 +312,10 @@ async function handleTextCommand({ textInput, from, profileName, session }) {
       return [text(`Product ${productId} not found.`)];
     }
 
-    return buildProductMessages(product, session);
+    return buildProductMessages(product);
   }
 
-  if (normalized.startsWith("add ")) {
+  if (normalized.startsWith("order ")) {
     const [, productId, quantityRaw] = trimmedText.split(/\s+/);
     const quantity = Number(quantityRaw || 1);
     const product = getProductById(productId || "");
@@ -457,25 +332,7 @@ async function handleTextCommand({ textInput, from, profileName, session }) {
       return [text(`Only ${product.stock} units available for ${product.name}.`)];
     }
 
-    addToCart(session, product, quantity);
-    await saveSession(from, session);
-    return [
-      text(`${product.name} added to your cart.`),
-      ...buildCartMessages(session)
-    ];
-  }
-
-  if (normalized.startsWith("remove ")) {
-    const productId = trimmedText.split(/\s+/)[1];
-    const initialSize = session.cart.length;
-    session.cart = session.cart.filter((item) => item.productId !== productId);
-
-    if (session.cart.length === initialSize) {
-      return [text(`Product ${productId} is not in your cart.`)];
-    }
-
-    await saveSession(from, session);
-    return buildCartMessages(session);
+    return beginOrder(from, session, product, quantity);
   }
 
   return [...helpMessages()];

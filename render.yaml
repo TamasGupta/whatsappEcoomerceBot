@@ -1,3 +1,10 @@
+databases:
+  - name: Motocommerce
+    databaseName: motocommercedb
+    user: thomasgupta
+    plan: free
+    region: oregon
+
 services:
   - type: web
     name: whatsapp-ecommerce-bot
@@ -16,5 +23,9 @@ services:
         sync: false
       - key: WHATSAPP_PHONE_NUMBER_ID
         sync: false
+      - key: DATABASE_URL
+        fromDatabase:
+          name: Motocommerce
+          property: connectionString
       - key: CATALOG_CURRENCY
         value: INR

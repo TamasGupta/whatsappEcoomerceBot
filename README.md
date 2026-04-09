@@ -16,7 +16,7 @@ This project is built for the WhatsApp Cloud API webhook flow. If you do not con
 - keyword search across product name, category, description, and tags
 - cart management with add/remove actions
 - multi-step checkout for address and payment mode
-- in-memory order creation
+- Postgres-backed sessions and orders when `DATABASE_URL` is configured
 - webhook verification endpoint for Meta
 
 ## Project Structure
@@ -28,14 +28,17 @@ This project is built for the WhatsApp Cloud API webhook flow. If you do not con
 │   ├── bot
 │   │   ├── handlers.js
 │   │   └── sessionStore.js
-│   ├── services/whatsapp.js
+│   ├── services
+│   │   ├── db.js
+│   │   └── whatsapp.js
 │   ├── store
 │   │   ├── orders.js
 │   │   └── products.js
 │   ├── config.js
 │   └── index.js
 ├── .env.example
-└── package.json
+├── package.json
+└── render.yaml
 ```
 
 ## Commands Users Can Send
@@ -74,6 +77,7 @@ This project is built for the WhatsApp Cloud API webhook flow. If you do not con
 - `VERIFY_TOKEN`: any secret string you will also enter in the Meta webhook config
 - `WHATSAPP_TOKEN`: WhatsApp Cloud API permanent or temporary access token
 - `WHATSAPP_PHONE_NUMBER_ID`: phone number ID from Meta
+- `DATABASE_URL`: Postgres connection string if you want persistence outside local memory
 - `CATALOG_CURRENCY`: for example `INR` or `USD`
 
 4. Start the server:
@@ -88,16 +92,26 @@ This repo is ready for Render using [render.yaml](C:\Users\Asus\Desktop\whatBot\
 
 1. Push this project to GitHub.
 2. In Render, create a new Blueprint service from that repo.
-3. Render will detect `render.yaml` and create the web service automatically.
-4. Set these secret environment variables in Render:
+3. Render will detect `render.yaml` and create:
+
+- a web service named `whatsapp-ecommerce-bot`
+- a Postgres database named `Motocommerce`
+
+4. The bundled Postgres config matches your exported Render setup:
+
+- database name: `motocommercedb`
+- database user: `thomasgupta`
+- region: `oregon`
+
+5. Set these secret environment variables in Render:
 
 - `VERIFY_TOKEN`
 - `WHATSAPP_TOKEN`
 - `WHATSAPP_PHONE_NUMBER_ID`
 
-5. Optionally set `CATALOG_CURRENCY` if you do not want `INR`.
+`DATABASE_URL` is wired automatically from the Render Postgres connection string by the blueprint.
 
-After deployment, Render will give you a permanent URL like:
+6. After deployment, Render will give you a permanent URL like:
 
 ```text
 https://your-app-name.onrender.com
@@ -124,7 +138,7 @@ User: catalog
 Bot: Available products...
 
 User: search jeans
-Bot: Slim Fit Blue Jeans (P1002) - ₹1,499.00
+Bot: Slim Fit Blue Jeans (P1002) - Rs.1,499.00
 
 User: add P1002 1
 Bot: Slim Fit Blue Jeans added to cart...
@@ -141,7 +155,6 @@ Bot: Order placed successfully: ORD-0001
 
 ## Next Improvements
 
-- persist products and orders in a database
 - send interactive list buttons instead of plain text commands
 - integrate payments and order status updates
 - add admin flows for managing products and stock

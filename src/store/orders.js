@@ -1,11 +1,11 @@
-const { hasDatabase, query } = require("../services/db");
+const { hasDatabaseConfig, isDatabaseReady, query } = require("../services/db");
 
 const orders = [];
 
 async function createOrder({ customerPhone, customerName, items, shippingAddress, paymentMode }) {
   const totalAmount = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
 
-  if (!hasDatabase) {
+  if (!hasDatabaseConfig() || !isDatabaseReady()) {
     const order = {
       id: `ORD-${String(orders.length + 1).padStart(4, "0")}`,
       customerPhone,

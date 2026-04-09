@@ -3,6 +3,7 @@ const { Pool } = require("pg");
 const connectionString = process.env.DATABASE_URL || "";
 
 let pool = null;
+let databaseReady = false;
 
 if (connectionString) {
   pool = new Pool({
@@ -15,21 +16,28 @@ if (connectionString) {
   });
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function hasDatabaseConfig() {
+  return Boolean(pool);
+}
+
+function isDatabaseReady() {
+  return databaseReady;
+}
+
 async function query(text, params = []) {
-  if (!pool) {
-    throw new Error("DATABASE_URL is not configured.");
+  if (!pool || !databaseReady) {
+    throw new Error("Database is not available.");
   }
 
   return pool.query(text, params);
 }
 
-async function initializeDatabase() {
-  if (!pool) {
-    console.log("DATABASE_URL not set. Using in-memory sessions and orders.");
-    return;
-  }
-
-  await query(`
+async function createTables() {
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS bot_sessions (
       phone_number TEXT PRIMARY KEY,
       step TEXT NOT NULL DEFAULT 'idle',
@@ -39,7 +47,7 @@ async function initializeDatabase() {
     );
   `);
 
-  await query(`
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS orders (
       id BIGSERIAL PRIMARY KEY,
       external_order_id TEXT UNIQUE,
@@ -52,7 +60,7 @@ async function initializeDatabase() {
     );
   `);
 
-  await query(`
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS order_items (
       id BIGSERIAL PRIMARY KEY,
       order_id BIGINT NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
@@ -64,8 +72,40 @@ async function initializeDatabase() {
   `);
 }
 
+async function initializeDatabase() {
+  if (!pool) {
+    console.log("DATABASE_URL not set. Using in-memory sessions and orders.");
+    return false;
+  }
+
+  const maxAttempts = 5;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      await pool.query("SELECT 1");
+      await createTables();
+      databaseReady = true;
+      console.log("Database connected.");
+      return true;
+    } catch (error) {
+      databaseReady = false;
+      console.error(
+        `Database init attempt ${attempt}/${maxAttempts} failed: ${error.code || error.message}`
+      );
+
+      if (attempt < maxAttempts) {
+        await sleep(attempt * 2000);
+      }
+    }
+  }
+
+  console.error("Database unavailable after retries. Falling back to in-memory sessions and orders.");
+  return false;
+}
+
 module.exports = {
-  hasDatabase: Boolean(pool),
+  hasDatabaseConfig,
   initializeDatabase,
+  isDatabaseReady,
   query
 };

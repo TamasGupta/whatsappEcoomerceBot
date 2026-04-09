@@ -1,4 +1,4 @@
-const { hasDatabase, query } = require("../services/db");
+const { hasDatabaseConfig, isDatabaseReady, query } = require("../services/db");
 
 const sessions = new Map();
 
@@ -14,7 +14,7 @@ function emptySession() {
 }
 
 async function getSession(phoneNumber) {
-  if (!hasDatabase) {
+  if (!hasDatabaseConfig() || !isDatabaseReady()) {
     if (!sessions.has(phoneNumber)) {
       sessions.set(phoneNumber, emptySession());
     }
@@ -46,7 +46,7 @@ async function getSession(phoneNumber) {
 }
 
 async function saveSession(phoneNumber, session) {
-  if (!hasDatabase) {
+  if (!hasDatabaseConfig() || !isDatabaseReady()) {
     sessions.set(phoneNumber, session);
     return session;
   }

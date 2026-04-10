@@ -74,8 +74,20 @@ async function sendInteractiveList(to, bodyText, buttonText, sections, options =
   });
 }
 
+function normalizeMessages(messages) {
+  if (messages == null) {
+    return [];
+  }
+
+  return Array.isArray(messages) ? messages : [messages];
+}
+
 async function sendMessages(to, messages) {
-  for (const message of messages) {
+  for (const message of normalizeMessages(messages)) {
+    if (!message || typeof message !== "object") {
+      throw new Error(`Invalid outgoing message payload: ${JSON.stringify(message)}`);
+    }
+
     if (message.type === "text") {
       await sendTextMessage(to, message.body);
       continue;

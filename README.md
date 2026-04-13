@@ -89,6 +89,8 @@ This project is built for the WhatsApp Cloud API webhook flow. If you do not con
 - `WHATSAPP_TOKEN`: WhatsApp Cloud API permanent or temporary access token
 - `WHATSAPP_PHONE_NUMBER_ID`: phone number ID from Meta
 - `DATABASE_URL`: Postgres connection string if you want persistence outside local memory
+- `DATABASE_SSL`: set to `true` for providers that require TLS such as Neon, Supabase, Railway, and most hosted Postgres services
+- `DATABASE_SSL_REJECT_UNAUTHORIZED`: set to `false` if your provider requires SSL but does not need strict certificate validation in the client config
 - `CATALOG_CURRENCY`: for example `INR` or `USD`
 
 4. Start the server:
@@ -103,24 +105,19 @@ This repo is ready for Render using [render.yaml](C:\Users\Asus\Desktop\whatBot\
 
 1. Push this project to GitHub.
 2. In Render, create a new Blueprint service from that repo.
-3. Render will detect `render.yaml` and create:
+3. Render will detect `render.yaml` and create a web service named `whatsapp-ecommerce-bot`.
 
-- a web service named `whatsapp-ecommerce-bot`
-- a Postgres database named `Motocommerce`
-
-4. The bundled Postgres config matches your exported Render setup:
-
-- database name: `motocommercedb`
-- database user: `thomasgupta`
-- region: `oregon`
-
-5. Set these secret environment variables in Render:
+4. Set these secret environment variables in Render:
 
 - `VERIFY_TOKEN`
 - `WHATSAPP_TOKEN`
 - `WHATSAPP_PHONE_NUMBER_ID`
+- `DATABASE_URL`
 
-`DATABASE_URL` is wired automatically from the Render Postgres connection string by the blueprint.
+5. Optional database TLS variables:
+
+- `DATABASE_SSL=true`
+- `DATABASE_SSL_REJECT_UNAUTHORIZED=false`
 
 6. After deployment, Render will give you a permanent URL like:
 
@@ -172,3 +169,74 @@ Bot: Order placed successfully: ORD-0001
 
 - integrate payments and order status updates
 - add admin flows for managing products and stock
+
+## Shift Away From Render Postgres
+
+This app can move to any managed Postgres provider. The only required application change is updating environment variables:
+
+- set `DATABASE_URL` to the new provider's connection string
+- set `DATABASE_SSL=true` unless your provider explicitly says SSL is disabled
+- set `DATABASE_SSL_REJECT_UNAUTHORIZED=false` only if the provider's Node/Postgres example requires it
+
+### Supabase Wiring
+
+For Supabase, use the Postgres connection string from the Supabase dashboard and prefer the Supavisor session pooler host for a deployed Node service on Render.
+
+- `DATABASE_URL=postgres://postgres.<project-ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres`
+- `DATABASE_SSL=true`
+- `DATABASE_SSL_REJECT_UNAUTHORIZED=false`
+
+Render environment variables for the web service:
+
+- `DATABASE_URL`: your Supabase connection string
+- `DATABASE_SSL`: `true`
+- `DATABASE_SSL_REJECT_UNAUTHORIZED`: `false`
+
+Local `.env` example:
+
+```dotenv
+DATABASE_URL=postgres://postgres.project-ref:password@aws-0-region.pooler.supabase.com:5432/postgres
+DATABASE_SSL=true
+DATABASE_SSL_REJECT_UNAUTHORIZED=false
+```
+
+Suggested migration flow:
+
+1. Create a new Supabase project and copy its database password and session pooler connection string from the Supabase dashboard.
+2. If you have PostgreSQL client tools installed, export the current Render database:
+
+   ```bash
+   pg_dump "CURRENT_RENDER_DATABASE_URL" --no-owner --no-privileges > render-backup.sql
+   ```
+
+3. Import it into the new Supabase database:
+
+   ```bash
+   psql "NEW_DATABASE_URL" -f render-backup.sql
+   ```
+
+4. Update your deployment environment variable `DATABASE_URL` to the Supabase database.
+5. Redeploy and confirm the app logs `Database connected.`
+
+If you do not have `pg_dump` and `psql`, use the bundled Node migration script instead:
+
+```bash
+SOURCE_DATABASE_URL="CURRENT_RENDER_DATABASE_URL" TARGET_DATABASE_URL="NEW_DATABASE_URL" npm run migrate:db
+```
+
+On Windows PowerShell:
+
+```powershell
+$env:SOURCE_DATABASE_URL="CURRENT_RENDER_DATABASE_URL"
+$env:TARGET_DATABASE_URL="SUPABASE_DATABASE_URL"
+$env:SOURCE_DATABASE_SSL="true"
+$env:TARGET_DATABASE_SSL="true"
+npm run migrate:db
+```
+
+Optional TLS flags for the script:
+
+- `SOURCE_DATABASE_SSL`
+- `SOURCE_DATABASE_SSL_REJECT_UNAUTHORIZED`
+- `TARGET_DATABASE_SSL`
+- `TARGET_DATABASE_SSL_REJECT_UNAUTHORIZED`

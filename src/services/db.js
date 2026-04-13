@@ -1,18 +1,68 @@
 const { Pool } = require("pg");
 
 const connectionString = process.env.DATABASE_URL || "";
+const databaseSsl = process.env.DATABASE_SSL;
+const databaseSslRejectUnauthorized = process.env.DATABASE_SSL_REJECT_UNAUTHORIZED;
 
 let pool = null;
 let databaseReady = false;
 
+function parseBoolean(value) {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const normalized = value.trim().toLowerCase();
+
+  if (["true", "1", "yes", "on"].includes(normalized)) {
+    return true;
+  }
+
+  if (["false", "0", "no", "off"].includes(normalized)) {
+    return false;
+  }
+
+  return undefined;
+}
+
+function getSslConfig() {
+  const explicitSsl = parseBoolean(databaseSsl);
+  const explicitRejectUnauthorized = parseBoolean(databaseSslRejectUnauthorized);
+
+  if (explicitSsl === false) {
+    return undefined;
+  }
+
+  let sslMode = "";
+
+  if (connectionString) {
+    try {
+      const parsedUrl = new URL(connectionString);
+      sslMode = (parsedUrl.searchParams.get("sslmode") || "").toLowerCase();
+    } catch (error) {
+      console.warn("Could not parse DATABASE_URL for sslmode. Falling back to env-based SSL config.");
+    }
+  }
+
+  const sslRequiredByUrl = ["require", "verify-ca", "verify-full", "prefer", "allow"].includes(sslMode);
+  const shouldUseSsl = explicitSsl === true || sslRequiredByUrl;
+
+  if (!shouldUseSsl) {
+    return undefined;
+  }
+
+  return {
+    rejectUnauthorized:
+      explicitRejectUnauthorized !== undefined
+        ? explicitRejectUnauthorized
+        : ["verify-ca", "verify-full"].includes(sslMode)
+  };
+}
+
 if (connectionString) {
   pool = new Pool({
     connectionString,
-    ssl: connectionString.includes("render.com")
-      ? {
-          rejectUnauthorized: false
-        }
-      : undefined
+    ssl: getSslConfig()
   });
 }
 

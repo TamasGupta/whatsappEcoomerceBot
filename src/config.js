@@ -6,6 +6,7 @@ dotenv.config();
 module.exports = {
   port: Number(process.env.PORT || 3000),
   appBaseUrl: process.env.APP_BASE_URL || `http://localhost:${process.env.PORT || 3000}`,
+  allowedOrigins: process.env.ALLOWED_ORIGINS || "*",
   verifyToken: process.env.VERIFY_TOKEN || "",
   whatsappToken: process.env.WHATSAPP_TOKEN || "",
   phoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID || "",

@@ -1,6 +1,6 @@
 const express = require("express");
 const path = require("path");
-const { port, verifyToken, uploadsDir } = require("./config");
+const { allowedOrigins, port, verifyToken, uploadsDir } = require("./config");
 const { initializeDatabase, isDatabaseReady } = require("./services/db");
 const { sendMessages, sendTextMessage } = require("./services/whatsapp");
 const { handleIncomingMessage } = require("./bot/handlers");
@@ -82,6 +82,32 @@ async function startServer() {
   await initializeDatabase();
 
   const app = express();
+  const originRules = String(allowedOrigins || "*")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+
+  app.use((req, res, next) => {
+    const requestOrigin = req.headers.origin;
+    const allowAnyOrigin = originRules.includes("*");
+    const isAllowedOrigin = requestOrigin && originRules.includes(requestOrigin);
+
+    if (allowAnyOrigin) {
+      res.setHeader("Access-Control-Allow-Origin", "*");
+    } else if (isAllowedOrigin) {
+      res.setHeader("Access-Control-Allow-Origin", requestOrigin);
+      res.setHeader("Vary", "Origin");
+    }
+
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+
+    if (req.method === "OPTIONS") {
+      return res.sendStatus(204);
+    }
+
+    return next();
+  });
   app.use(express.json({ limit: "15mb" }));
   app.use("/uploads", express.static(uploadsDir));
   app.use("/api", apiRouter);

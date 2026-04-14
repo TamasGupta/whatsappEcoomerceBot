@@ -4,12 +4,11 @@ const sessions = new Map();
 
 function emptySession() {
   return {
-    step: "idle",
-    cart: [],
-    checkoutDraft: {
-      shippingAddress: "",
-      paymentMode: ""
-    }
+    currentStep: "idle",
+    selectedProductId: null,
+    selectedQuantity: null,
+    pendingOrder: null,
+    searchQuery: null
   };
 }
 
@@ -24,7 +23,7 @@ async function getSession(phoneNumber) {
 
   const result = await query(
     `
-      SELECT step, cart, checkout_draft
+      SELECT current_step, session_data
       FROM bot_sessions
       WHERE phone_number = $1
     `,
@@ -37,44 +36,47 @@ async function getSession(phoneNumber) {
     return session;
   }
 
-  const row = result.rows[0];
   return {
-    step: row.step,
-    cart: row.cart || [],
-    checkoutDraft: row.checkout_draft || emptySession().checkoutDraft
+    ...emptySession(),
+    ...(result.rows[0].session_data || {}),
+    currentStep: result.rows[0].current_step || "idle"
   };
 }
 
 async function saveSession(phoneNumber, session) {
+  const normalized = {
+    ...emptySession(),
+    ...session
+  };
+
   if (!hasDatabaseConfig() || !isDatabaseReady()) {
-    sessions.set(phoneNumber, session);
-    return session;
+    sessions.set(phoneNumber, normalized);
+    return normalized;
   }
 
   await query(
     `
-      INSERT INTO bot_sessions (phone_number, step, cart, checkout_draft, updated_at)
-      VALUES ($1, $2, $3::jsonb, $4::jsonb, NOW())
+      INSERT INTO bot_sessions (phone_number, current_step, session_data, updated_at)
+      VALUES ($1, $2, $3::jsonb, NOW())
       ON CONFLICT (phone_number)
       DO UPDATE SET
-        step = EXCLUDED.step,
-        cart = EXCLUDED.cart,
-        checkout_draft = EXCLUDED.checkout_draft,
+        current_step = EXCLUDED.current_step,
+        session_data = EXCLUDED.session_data,
         updated_at = NOW()
     `,
-    [phoneNumber, session.step, JSON.stringify(session.cart), JSON.stringify(session.checkoutDraft)]
+    [phoneNumber, normalized.currentStep, JSON.stringify(normalized)]
   );
 
-  return session;
+  return normalized;
 }
 
 async function resetSession(phoneNumber) {
   const session = emptySession();
-  await saveSession(phoneNumber, session);
-  return session;
+  return saveSession(phoneNumber, session);
 }
 
 module.exports = {
+  emptySession,
   getSession,
   resetSession,
   saveSession

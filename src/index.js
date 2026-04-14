@@ -1,16 +1,20 @@
 const express = require("express");
-const { port, verifyToken } = require("./config");
-const { sendMessages } = require("./services/whatsapp");
+const path = require("path");
+const { port, verifyToken, uploadsDir } = require("./config");
 const { initializeDatabase } = require("./services/db");
+const { sendMessages } = require("./services/whatsapp");
 const { handleIncomingMessage } = require("./bot/handlers");
 const { markIfNew } = require("./bot/messageDeduper");
-const { loadProducts } = require("./store/products");
+const apiRouter = require("./routes/api");
+const { ensureDirectory } = require("./services/storage");
 
 function extractIncomingInput(message) {
   if (message.type === "text") {
     return {
-      inputType: "text",
-      input: message.text?.body || ""
+      message: {
+        kind: "text",
+        value: message.text?.body || ""
+      }
     };
   }
 
@@ -20,25 +24,41 @@ function extractIncomingInput(message) {
 
     if (buttonReply || listReply) {
       return {
-        inputType: "interactive",
-        input: buttonReply || listReply
+        message: {
+          kind: "interactive",
+          value: buttonReply || listReply
+        }
       };
     }
+  }
+
+  if (message.type === "image" || message.type === "document") {
+    return {
+      message: {
+        kind: "media",
+        value: message[message.type]?.caption || "",
+        mediaId: message[message.type]?.id,
+        mediaType: message.type
+      }
+    };
   }
 
   return null;
 }
 
 async function startServer() {
-  loadProducts();
+  ensureDirectory(uploadsDir);
   await initializeDatabase();
 
   const app = express();
-  app.use(express.json());
+  app.use(express.json({ limit: "15mb" }));
+  app.use("/uploads", express.static(uploadsDir));
+  app.use("/api", apiRouter);
 
   app.get("/", (_req, res) => {
     res.json({
-      service: "whatsapp-ecommerce-bot",
+      service: "marketplace-backend",
+      clients: ["whatsapp-bot", "react-native-app"],
       status: "ok"
     });
   });
@@ -84,8 +104,7 @@ async function startServer() {
           const replies = await handleIncomingMessage({
             from,
             profileName,
-            input: incomingInput.input,
-            inputType: incomingInput.inputType
+            message: incomingInput.message
           });
 
           await sendMessages(from, replies);
@@ -101,12 +120,19 @@ async function startServer() {
     }
   });
 
+  app.use((error, _req, res, _next) => {
+    console.error(error);
+    res.status(500).json({
+      error: error.message || "Unexpected server error."
+    });
+  });
+
   app.listen(port, () => {
-    console.log(`WhatsApp ecommerce bot listening on port ${port}`);
+    console.log(`Marketplace backend listening on port ${port}`);
   });
 }
 
 startServer().catch((error) => {
-  console.error("Failed to start the bot:", error);
+  console.error("Failed to start the backend:", error);
   process.exit(1);
 });

@@ -1,22 +1,31 @@
 const { getSession, resetSession, saveSession } = require("./sessionStore");
-const { createOrder } = require("../store/orders");
+const { downloadWhatsAppMedia } = require("../services/storage");
+const { generateReceipt } = require("../services/receipt");
 const {
+  attachPaymentProof,
+  createOrder,
   formatCurrency,
-  formatProduct,
-  getCategories,
-  getProductById,
-  getProducts,
-  getProductsByCategory,
-  searchProducts
-} = require("../store/products");
+  getOrderById,
+  getPublicProductById,
+  listBuyerOrders,
+  listPublicCategories,
+  listPublicProducts,
+  logActivity,
+  updateOrderReceipt
+} = require("../store/marketplace");
 
 const HOME_BUTTONS = [
   { id: "MENU_BROWSE", title: "Browse" },
-  { id: "MENU_SEARCH", title: "Search" }
+  { id: "MENU_SEARCH", title: "Search" },
+  { id: "MENU_ORDERS", title: "My Orders" }
 ];
 
 function text(body) {
   return { type: "text", body };
+}
+
+function image(imageUrl, caption) {
+  return { type: "image", imageUrl, caption };
 }
 
 function buttons(body, buttonList, footer) {
@@ -31,71 +40,41 @@ function homeMessages(profileName) {
   return [
     text(
       [
-        `Hi ${profileName || "there"}, welcome to MotoCommerce.`,
-        "Browse products, search quickly, and place your order right here on WhatsApp."
-      ].join("\n\n")
-    ),
-    buttons("Choose what you want to do next.", HOME_BUTTONS, "You can also type help anytime.")
-  ];
-}
-
-function helpMessages() {
-  return [
-    buttons("Use the menu or type a command.", HOME_BUTTONS, "Quick ordering is enabled."),
-    text(
-      [
-        "Text commands:",
-        "catalog",
-        "search <keyword>",
-        "view <product_id>",
-        "order <product_id> <qty>",
-        "help"
+        `Hi ${profileName || "there"}, welcome to Marketplace Bot.`,
+        "1. Browse Products",
+        "2. Search Product",
+        "3. My Orders"
       ].join("\n")
-    )
+    ),
+    buttons("Choose an option.", HOME_BUTTONS, "You can also type 1, 2, or 3.")
   ];
 }
 
-function buildCategoryListMessage() {
-  const categories = getCategories();
+async function buildCategoryListMessage() {
+  const categories = await listPublicCategories();
   const sections = [
     {
-      title: "Shop By Category",
+      title: "Categories",
       rows: categories.map((category) => ({
         id: `CATEGORY_${category.toUpperCase().replace(/[^A-Z0-9]+/g, "_")}`,
         title: category.slice(0, 24),
-        description: `${getProductsByCategory(category).length} products`
+        description: `Browse ${category}`
       }))
-    },
-    {
-      title: "Quick Access",
-      rows: [
-        {
-          id: "CATALOG_ALL",
-          title: "All Products",
-          description: `See all ${getProducts().length} items`
-        }
-      ]
     }
   ];
 
-  return list(
-    "Catalog",
-    "Pick a category to explore the catalog.",
-    "Open Catalog",
-    sections,
-    "Tap a category to continue."
-  );
+  return list("Browse Products", "Pick a category.", "Open Categories", sections, "Shared backend catalog");
 }
 
 function buildProductListMessage(title, products, emptyMessage) {
   if (!products.length) {
-    return [text(emptyMessage), buttons("Go back to the main menu.", HOME_BUTTONS)];
+    return [text(emptyMessage), buttons("Choose another action.", HOME_BUTTONS)];
   }
 
   return [
     list(
       title,
-      "Select a product to see details and order it.",
+      "Select a product to view details.",
       "View Products",
       [
         {
@@ -103,249 +82,333 @@ function buildProductListMessage(title, products, emptyMessage) {
           rows: products.slice(0, 10).map((product) => ({
             id: `PRODUCT_${product.id}`,
             title: product.name.slice(0, 24),
-            description: `${formatCurrency(product.price)} | Stock ${product.stock}`
+            description: `${formatCurrency(product.price)} | MOQ ${product.moq}`
           }))
         }
       ],
-      "Showing up to 10 products per menu."
+      "Showing up to 10 products."
     )
   ];
 }
 
-function setPendingOrder(session, product, quantity) {
-  session.cart = [
-    {
-      productId: product.id,
-      name: product.name,
-      price: product.price,
-      quantity
-    }
-  ];
-}
-
-function getPendingOrder(session) {
-  return session.cart || [];
-}
-
-function buildOrderPreview(items) {
-  const total = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
-
+function buildProductCaption(product) {
   return [
-    "Order summary:",
-    ...items.map(
-      (item, index) =>
-        `${index + 1}. ${item.name} x ${item.quantity} = ${formatCurrency(item.price * item.quantity)}`
-    ),
-    "",
-    `Total: ${formatCurrency(total)}`
-  ].join("\n");
+    `*${product.name}*`,
+    `Price: ${formatCurrency(product.price)}`,
+    `MOQ: ${product.moq}`,
+    `Stock: ${product.stock}`,
+    `Seller: ${product.seller_name}`,
+    product.description || ""
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
-function buildProductMessages(product) {
-  return [
-    text(formatProduct(product)),
+function productMessages(product) {
+  const replies = [];
+
+  if (product.image_url) {
+    replies.push(image(product.image_url, buildProductCaption(product)));
+  } else {
+    replies.push(text(buildProductCaption(product)));
+  }
+
+  replies.push(
     buttons(
-      "Choose an action for this product.",
+      "Choose an action.",
       [
-        { id: `ORDER_${product.id}`, title: "Order Now" },
-        { id: "MENU_BROWSE", title: "Browse" },
-        { id: "MENU_SEARCH", title: "Search" }
+        { id: `BUY_${product.id}`, title: "Buy" },
+        { id: `NEXT_${product.category}`, title: "Next" },
+        { id: "MENU_BROWSE", title: "Menu" }
       ],
-      "Use text command order <product_id> <qty> for custom quantity."
+      "Buy starts an order flow."
     )
-  ];
+  );
+
+  return replies;
 }
 
-async function beginOrder(from, session, product, quantity) {
-  setPendingOrder(session, product, quantity);
-  session.step = "awaiting_address";
-  session.checkoutDraft = {
-    shippingAddress: "",
-    paymentMode: "PENDING"
-  };
-  await saveSession(from, session);
+async function showMyOrders(phone) {
+  const orders = await listBuyerOrders(phone);
 
-  return [
-    text(buildOrderPreview(getPendingOrder(session))),
-    text("Please send your full delivery address to confirm this order.")
-  ];
-}
-
-async function finalizeOrder({ from, profileName, session }) {
-  const items = getPendingOrder(session);
-  const order = await createOrder({
-    customerPhone: from,
-    customerName: profileName || "Customer",
-    items: items.map((item) => ({ ...item })),
-    shippingAddress: session.checkoutDraft.shippingAddress,
-    paymentMode: "PENDING"
-  });
-
-  const total = order.items.reduce((sum, item) => sum + item.price * item.quantity, 0);
-  await resetSession(from);
+  if (!orders.length) {
+    return [text("You have no recent orders."), buttons("Back to menu.", HOME_BUTTONS)];
+  }
 
   return [
     text(
       [
-        `Order confirmed: ${order.id}`,
-        buildOrderPreview(order.items),
-        `Delivery address: ${order.shippingAddress}`,
-        "Payment: To be configured later"
-      ].join("\n\n")
-    ),
-    buttons("Want to order another product?", HOME_BUTTONS)
+        "Your recent orders:",
+        ...orders.map(
+          (order) =>
+            `${order.id} | ${order.status} | ${order.payment_mode} | ${formatCurrency(order.total_amount)}`
+        )
+      ].join("\n")
+    )
   ];
 }
 
-async function handleStep({ input, from, profileName, session }) {
-  if (session.step === "awaiting_search") {
-    session.step = "idle";
-    await saveSession(from, session);
-    const results = searchProducts(input);
+async function beginBuyFlow({ from, session, product }) {
+  session.currentStep = "awaiting_quantity";
+  session.selectedProductId = product.id;
+  session.selectedQuantity = null;
+  await saveSession(from, session);
 
-    if (!results.length) {
-      return [
-        text(`No products found for "${input}".`),
-        buttons("Try browsing categories or search again.", HOME_BUTTONS)
-      ];
-    }
+  return [text(`Enter quantity for ${product.name}. Minimum order quantity is ${product.moq}.`)];
+}
 
-    return buildProductListMessage("Search Results", results, "No matching products found.");
+async function createOrderForSession({ from, profileName, session, paymentMode }) {
+  const product = await getPublicProductById(session.selectedProductId);
+
+  if (!product) {
+    await resetSession(from);
+    return [text("This product is no longer available.")];
   }
 
-  if (session.step === "awaiting_address") {
-    session.checkoutDraft.shippingAddress = input;
+  const status = paymentMode === "prepaid" ? "pending" : "pending_seller_confirmation";
+  const orderId = await createOrder({
+    buyerPhone: from,
+    buyerName: profileName || "Buyer",
+    sellerId: product.seller_id,
+    items: [
+      {
+        product_id: product.id,
+        product_name: product.name,
+        quantity: session.selectedQuantity,
+        price: product.price,
+        image_url: product.image_url
+      }
+    ],
+    address: session.pendingOrder.address,
+    paymentMode,
+    status
+  });
+
+  await logActivity({
+    actorRole: "buyer",
+    action: "order_created_from_whatsapp",
+    entityType: "order",
+    entityId: orderId,
+    details: { buyerPhone: from, productId: product.id, paymentMode }
+  });
+
+  const order = await getOrderById(orderId);
+
+  if (paymentMode === "prepaid") {
+    session.currentStep = "awaiting_payment_proof";
+    session.pendingOrder = {
+      orderId,
+      paymentMode
+    };
     await saveSession(from, session);
-    return finalizeOrder({ from, profileName, session });
+
+    return [
+      text(
+        [
+          `Order created: ${order.id}`,
+          `Amount: ${formatCurrency(order.total_amount)}`,
+          `Payment details: ${product.payment_details || "Seller will share payment details soon."}`,
+          "Upload payment proof image to continue."
+        ].join("\n")
+      )
+    ];
+  }
+
+  await resetSession(from);
+  return [
+    text(
+      [
+        `Order created: ${order.id}`,
+        `Status: ${order.status}`,
+        `Amount: ${formatCurrency(order.total_amount)}`,
+        "Seller will confirm this order."
+      ].join("\n")
+    ),
+    buttons("Anything else?", HOME_BUTTONS)
+  ];
+}
+
+async function handleStep({ from, profileName, session, message }) {
+  if (session.currentStep === "awaiting_search" && message.kind === "text") {
+    session.currentStep = "idle";
+    session.searchQuery = message.value;
+    await saveSession(from, session);
+    const products = await listPublicProducts({ search: message.value, limit: 10 });
+    return buildProductListMessage("Search Results", products, `No products found for "${message.value}".`);
+  }
+
+  if (session.currentStep === "awaiting_quantity" && message.kind === "text") {
+    const product = await getPublicProductById(session.selectedProductId);
+
+    if (!product) {
+      await resetSession(from);
+      return [text("This product is no longer available.")];
+    }
+
+    const quantity = Number(message.value);
+
+    if (!Number.isInteger(quantity) || quantity < product.moq) {
+      return [text(`Enter a whole number quantity of at least ${product.moq}.`)];
+    }
+
+    if (quantity > product.stock) {
+      return [text(`Only ${product.stock} units are available.`)];
+    }
+
+    session.selectedQuantity = quantity;
+    session.currentStep = "awaiting_address";
+    await saveSession(from, session);
+    return [text("Send your delivery address.")];
+  }
+
+  if (session.currentStep === "awaiting_address" && message.kind === "text") {
+    session.pendingOrder = {
+      ...(session.pendingOrder || {}),
+      address: message.value
+    };
+    session.currentStep = "awaiting_payment_mode";
+    await saveSession(from, session);
+
+    return [
+      buttons(
+        "Select payment mode.",
+        [
+          { id: "PAY_prepaid", title: "Prepaid" },
+          { id: "PAY_cod", title: "COD" },
+          { id: "PAY_after_sales", title: "After Sales" }
+        ],
+        "Choose how you want to pay."
+      )
+    ];
+  }
+
+  if (session.currentStep === "awaiting_payment_proof" && message.kind === "media") {
+    const stored = await downloadWhatsAppMedia(message.mediaId, `${session.pendingOrder.orderId}_${Date.now()}`);
+    await attachPaymentProof({
+      orderId: session.pendingOrder.orderId,
+      proofUrl: stored.publicUrl
+    });
+
+    const order = await getOrderById(session.pendingOrder.orderId);
+    const receipt = generateReceipt(order);
+    await updateOrderReceipt(order.id, receipt.publicUrl);
+    await resetSession(from);
+
+    return [
+      text(
+        [
+          "Payment proof received.",
+          `Order: ${order.id}`,
+          `Receipt: ${receipt.publicUrl}`,
+          "Seller will review your order."
+        ].join("\n")
+      ),
+      buttons("Return to menu.", HOME_BUTTONS)
+    ];
+  }
+
+  if (session.currentStep === "awaiting_payment_proof") {
+    return [text("Upload an image or document as payment proof.")];
   }
 
   return null;
 }
 
-async function handleInteractiveCommand({ command, from, profileName, session }) {
-  if (command === "MENU_BROWSE") {
-    session.step = "idle";
-    await saveSession(from, session);
-    return [buildCategoryListMessage()];
+async function handleCommand({ from, profileName, session, message }) {
+  const input = message.kind === "text" ? message.value.trim() : message.value;
+  const normalized = String(input || "").toLowerCase();
+
+  if (session.currentStep !== "idle") {
+    const stepReply = await handleStep({ from, profileName, session, message });
+    if (stepReply) {
+      return stepReply;
+    }
   }
 
-  if (command === "MENU_SEARCH") {
-    session.step = "awaiting_search";
-    await saveSession(from, session);
-    return [text("Send a keyword to search the catalog. Example: earphones, jeans, bottle")];
-  }
-
-  if (command === "CATALOG_ALL") {
-    return buildProductListMessage("All Products", getProducts(), "No products available right now.");
-  }
-
-  if (command.startsWith("CATEGORY_")) {
-    const normalizedCategory = command.replace("CATEGORY_", "").replace(/_/g, " ");
-    const category = getCategories().find(
-      (item) => item.toLowerCase() === normalizedCategory.toLowerCase()
-    );
-
-    if (!category) {
-      return [text("That category is no longer available."), buildCategoryListMessage()];
+  if (message.kind === "interactive") {
+    if (input === "MENU_BROWSE") {
+      session.currentStep = "idle";
+      await saveSession(from, session);
+      return [await buildCategoryListMessage()];
     }
 
-    return buildProductListMessage(
-      category,
-      getProductsByCategory(category),
-      `No products available in ${category} right now.`
-    );
-  }
-
-  if (command.startsWith("PRODUCT_")) {
-    const product = getProductById(command.replace("PRODUCT_", ""));
-    if (!product) {
-      return [text("That product is no longer available."), buildCategoryListMessage()];
+    if (input === "MENU_SEARCH") {
+      session.currentStep = "awaiting_search";
+      await saveSession(from, session);
+      return [text("Send a product keyword to search.")];
     }
 
-    return buildProductMessages(product);
-  }
-
-  if (command.startsWith("ORDER_")) {
-    const product = getProductById(command.replace("ORDER_", ""));
-    if (!product) {
-      return [text("That product is no longer available.")];
+    if (input === "MENU_ORDERS") {
+      return showMyOrders(from);
     }
 
-    return beginOrder(from, session, product, 1);
+    if (input.startsWith("CATEGORY_")) {
+      const category = input.replace("CATEGORY_", "").replace(/_/g, " ");
+      const products = await listPublicProducts({ category, limit: 10 });
+      return buildProductListMessage(category, products, `No products found in ${category}.`);
+    }
+
+    if (input.startsWith("PRODUCT_")) {
+      const product = await getPublicProductById(input.replace("PRODUCT_", ""));
+      return product ? productMessages(product) : [text("Product not found.")];
+    }
+
+    if (input.startsWith("BUY_")) {
+      const product = await getPublicProductById(input.replace("BUY_", ""));
+      return product ? beginBuyFlow({ from, session, product }) : [text("Product not found.")];
+    }
+
+    if (input.startsWith("NEXT_")) {
+      const category = input.replace("NEXT_", "");
+      const products = await listPublicProducts({ category, limit: 10 });
+      return buildProductListMessage(category, products, `No more products found in ${category}.`);
+    }
+
+    if (input.startsWith("PAY_")) {
+      return createOrderForSession({
+        from,
+        profileName,
+        session,
+        paymentMode: input.replace("PAY_", "")
+      });
+    }
   }
 
-  return [text("I could not process that menu action."), ...helpMessages()];
+  if (message.kind === "text") {
+    if (["hi", "hello", "start", "menu"].includes(normalized)) {
+      return homeMessages(profileName);
+    }
+
+    if (normalized === "1") {
+      return [await buildCategoryListMessage()];
+    }
+
+    if (normalized === "2") {
+      session.currentStep = "awaiting_search";
+      await saveSession(from, session);
+      return [text("Send a product keyword to search.")];
+    }
+
+    if (normalized === "3") {
+      return showMyOrders(from);
+    }
+
+    const products = await listPublicProducts({ search: input, limit: 10 });
+
+    if (products.length) {
+      return buildProductListMessage("Search Results", products, "No products found.");
+    }
+  }
+
+  return [
+    text("I did not understand that."),
+    buttons("Choose an option.", HOME_BUTTONS)
+  ];
 }
 
-async function handleTextCommand({ textInput, from, profileName, session }) {
-  const trimmedText = textInput.trim();
-  const normalized = trimmedText.toLowerCase();
-
-  if (session.step !== "idle") {
-    return handleStep({ input: trimmedText, from, profileName, session });
-  }
-
-  if (!trimmedText || normalized === "help" || normalized === "menu" || normalized === "start") {
-    return homeMessages(profileName);
-  }
-
-  if (normalized === "catalog") {
-    return [buildCategoryListMessage()];
-  }
-
-  if (normalized.startsWith("search ")) {
-    const query = trimmedText.slice(7);
-    const results = searchProducts(query);
-
-    if (!results.length) {
-      return [text(`No products found for "${query}".`), buttons("Try another search or browse.", HOME_BUTTONS)];
-    }
-
-    return buildProductListMessage("Search Results", results, `No products found for "${query}".`);
-  }
-
-  if (normalized.startsWith("view ")) {
-    const productId = trimmedText.split(/\s+/)[1];
-    const product = getProductById(productId);
-
-    if (!product) {
-      return [text(`Product ${productId} not found.`)];
-    }
-
-    return buildProductMessages(product);
-  }
-
-  if (normalized.startsWith("order ")) {
-    const [, productId, quantityRaw] = trimmedText.split(/\s+/);
-    const quantity = Number(quantityRaw || 1);
-    const product = getProductById(productId || "");
-
-    if (!product) {
-      return [text(`Product ${productId || ""} not found.`)];
-    }
-
-    if (!Number.isInteger(quantity) || quantity <= 0) {
-      return [text("Quantity must be a positive whole number.")];
-    }
-
-    if (quantity > product.stock) {
-      return [text(`Only ${product.stock} units available for ${product.name}.`)];
-    }
-
-    return beginOrder(from, session, product, quantity);
-  }
-
-  return [...helpMessages()];
-}
-
-async function handleIncomingMessage({ from, profileName, input, inputType }) {
+async function handleIncomingMessage({ from, profileName, message }) {
   const session = await getSession(from);
-
-  if (inputType === "interactive") {
-    return handleInteractiveCommand({ command: input, from, profileName, session });
-  }
-
-  return handleTextCommand({ textInput: input, from, profileName, session });
+  return handleCommand({ from, profileName, session, message });
 }
 
 module.exports = {

@@ -38,6 +38,16 @@ async function sendTextMessage(to, body) {
   });
 }
 
+async function sendImageMessage(to, imageUrl, caption) {
+  return postMessage(to, {
+    type: "image",
+    image: {
+      link: imageUrl,
+      caption
+    }
+  });
+}
+
 async function sendInteractiveButtons(to, bodyText, buttons, options = {}) {
   return postMessage(to, {
     type: "interactive",
@@ -90,6 +100,11 @@ async function sendMessages(to, messages) {
 
     if (message.type === "text") {
       await sendTextMessage(to, message.body);
+      continue;
+    }
+
+    if (message.type === "image") {
+      await sendImageMessage(to, message.imageUrl, message.caption);
       continue;
     }
 

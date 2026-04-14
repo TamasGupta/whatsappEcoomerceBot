@@ -1,8 +1,8 @@
 const express = require("express");
 const path = require("path");
 const { port, verifyToken, uploadsDir } = require("./config");
-const { initializeDatabase } = require("./services/db");
-const { sendMessages } = require("./services/whatsapp");
+const { initializeDatabase, isDatabaseReady } = require("./services/db");
+const { sendMessages, sendTextMessage } = require("./services/whatsapp");
 const { handleIncomingMessage } = require("./bot/handlers");
 const { markIfNew } = require("./bot/messageDeduper");
 const apiRouter = require("./routes/api");
@@ -44,6 +44,37 @@ function extractIncomingInput(message) {
   }
 
   return null;
+}
+
+function buildUserFacingErrorMessage(error) {
+  const message = String(error?.message || "").toLowerCase();
+
+  if (!isDatabaseReady() || message.includes("database is not available")) {
+    return [
+      "We are having trouble reaching our catalog service right now.",
+      "Please try again in a few minutes."
+    ].join(" ");
+  }
+
+  if (message.includes("whatsapp api error")) {
+    return [
+      "We could not send the next reply right now due to a temporary messaging issue.",
+      "Please send your message again in a moment."
+    ].join(" ");
+  }
+
+  return [
+    "We could not complete your request right now.",
+    "Please try again shortly or type menu to restart."
+  ].join(" ");
+}
+
+async function notifyProcessingFailure(to, error) {
+  try {
+    await sendTextMessage(to, buildUserFacingErrorMessage(error));
+  } catch (notificationError) {
+    console.error("Failed to send fallback error message:", notificationError);
+  }
 }
 
 async function startServer() {
@@ -110,6 +141,7 @@ async function startServer() {
           await sendMessages(from, replies);
         } catch (error) {
           console.error("Async webhook processing failed:", error);
+          await notifyProcessingFailure(from, error);
         }
       })();
 

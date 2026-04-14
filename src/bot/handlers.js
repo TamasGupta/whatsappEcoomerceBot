@@ -52,6 +52,14 @@ function homeMessages(profileName) {
 
 async function buildCategoryListMessage() {
   const categories = await listPublicCategories();
+
+  if (!categories.length) {
+    return [
+      text("No products are available right now."),
+      buttons("Choose another action.", HOME_BUTTONS, "Ask the admin to publish active products.")
+    ];
+  }
+
   const sections = [
     {
       title: "Categories",
@@ -329,7 +337,7 @@ async function handleCommand({ from, profileName, session, message }) {
     if (input === "MENU_BROWSE") {
       session.currentStep = "idle";
       await saveSession(from, session);
-      return [await buildCategoryListMessage()];
+      return await buildCategoryListMessage();
     }
 
     if (input === "MENU_SEARCH") {
@@ -380,7 +388,7 @@ async function handleCommand({ from, profileName, session, message }) {
     }
 
     if (normalized === "1") {
-      return [await buildCategoryListMessage()];
+      return await buildCategoryListMessage();
     }
 
     if (normalized === "2") {
